@@ -5,12 +5,13 @@ import requests
 from bs4 import BeautifulSoup
 import glob
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import json
 from queue import Queue
 from fuzzywuzzy import process
 
+class PoisonPill:
+    pass
 
 def parse_download_params(onclick):
     if onclick is None:
@@ -64,9 +65,9 @@ def collect(url):
 
 def process_row(filename, row, queue):
     url = row['链接']
-    download_url = collect(url)
     new_row = row.copy()
-    new_row['download_url'] = download_url
+    new_row['download_url'] =collect(url)
+
     new_row = new_row.to_json()
     new_row = json.loads(new_row)
     new_row = json.dumps(new_row, ensure_ascii=False)
@@ -74,15 +75,23 @@ def process_row(filename, row, queue):
 
 def write_to_file(queue):
     while True:
-        filename, new_row = queue.get()
+        filename, new_row = queue.get(timeout=1)
+
+        if isinstance(filename, PoisonPill):
+            queue.task_done()
+            break
+        
+        filename = filename.split('.')[0]
         with open(f'{filename}_durl.jsonl', 'a') as f:
             f.write(new_row + '\n')
+        print(f"写入文件: {filename}_durl.jsonl")
         queue.task_done()
+        
 
 def getdownloadurl(retriveddflist):
     
     queue = Queue()
-
+    
     with ThreadPoolExecutor() as executor:
         writer_thread = executor.submit(write_to_file, queue)
         
@@ -91,12 +100,13 @@ def getdownloadurl(retriveddflist):
             for index, row in retriveddf.iterrows():
                 future = executor.submit(process_row, filename, row, queue)
                 futures.append(future)
-            
             for future in futures:
                 future.result()
+
+        queue.put((PoisonPill(), PoisonPill()))
         
         queue.join()
-        writer_thread.cancel() 
+        writer_thread.result()
 
 def retrieval(repopath, requestpath, keywords:list = None):
     '''
@@ -109,6 +119,7 @@ def retrieval(repopath, requestpath, keywords:list = None):
 
     repodflist = [pd.read_csv(repo) for repo in repos]
     repodf = pd.concat(repodflist)
+
     retriveddflist =[]
     for file in files:
         with open(file, 'r') as f:
