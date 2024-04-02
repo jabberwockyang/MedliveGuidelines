@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 import glob
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor , wait
 import json
 from queue import Queue
 from fuzzywuzzy import process
@@ -75,7 +75,7 @@ def process_row(filename, row, queue):
 
 def write_to_file(queue):
     while True:
-        filename, new_row = queue.get(timeout=1)
+        filename, new_row = queue.get()
 
         if isinstance(filename, PoisonPill):
             queue.task_done()
@@ -93,6 +93,7 @@ def getdownloadurl(retriveddflist):
     queue = Queue()
     
     with ThreadPoolExecutor() as executor:
+
         writer_thread = executor.submit(write_to_file, queue)
         
         for filename, retriveddf in retriveddflist:
@@ -100,6 +101,7 @@ def getdownloadurl(retriveddflist):
             for index, row in retriveddf.iterrows():
                 future = executor.submit(process_row, filename, row, queue)
                 futures.append(future)
+
             for future in futures:
                 future.result()
 
